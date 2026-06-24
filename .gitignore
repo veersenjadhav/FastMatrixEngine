@@ -1,0 +1,5 @@
+MathTests/bin
+MathTests/obj
+MathTests/BenchmarkDotNet.Artifacts
+FastMatrixEngine/bin
+FastMatrixEngine/obj
