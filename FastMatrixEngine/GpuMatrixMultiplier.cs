@@ -1,3 +1,4 @@
+using System;
 using ILGPU;
 using ILGPU.Runtime;
 
@@ -87,6 +88,38 @@ namespace FastMatrixEngine
             return bufferC.GetAsArray2D();
         }
 
+        /// <summary>
+        /// Overload to handle hilf-precision float[,] arrays. 
+        /// </summary>
+        public static System.Half[,] Multiply(System.Half[,] matrixA, System.Half[,] matrixB)
+        {
+            // The exact same logic as above, but swapped for 'double' types.
+            int rowsA = matrixA.GetLength(0);
+            int colsA = matrixA.GetLength(1);
+            int rowsB = matrixB.GetLength(0);
+            int colsB = matrixB.GetLength(1);
+
+            if (colsA != rowsB) throw new ArgumentException("Inner dimensions must agree.");
+
+            using Context context = HardwareDetector.CreateContext();
+            using Accelerator accelerator = HardwareDetector.GetBestAccelerator(context);
+
+            var kernel = accelerator.LoadAutoGroupedStreamKernel<
+                Index2D, ArrayView2D<System.Half, Stride2D.DenseX>, ArrayView2D<System.Half, Stride2D.DenseX>, ArrayView2D<System.Half, Stride2D.DenseX>, int>(MatrixMultiplyKernelFloatHalf);
+
+            using var bufferA = accelerator.Allocate2DDenseX<System.Half>(new Index2D(rowsA, colsA));
+            using var bufferB = accelerator.Allocate2DDenseX<System.Half>(new Index2D(rowsB, colsB));
+            using var bufferC = accelerator.Allocate2DDenseX<System.Half>(new Index2D(rowsA, colsB));
+
+            bufferA.CopyFromCPU(matrixA);
+            bufferB.CopyFromCPU(matrixB);
+
+            kernel(bufferC.IntExtent, bufferA.View, bufferB.View, bufferC.View, colsA);
+            accelerator.Synchronize();
+
+            return bufferC.GetAsArray2D();
+        }
+
         // =====================================================================
         // ILGPU KERNELS (This code is compiled to PTX/C++ and runs on the GPU)
         // =====================================================================
@@ -125,6 +158,24 @@ namespace FastMatrixEngine
             int row = index.X;
             int col = index.Y;
             double sum = 0.0;
+
+            for (int i = 0; i < sharedDim; i++)
+            {
+                sum += aView[new Index2D(row, i)] * bView[new Index2D(i, col)];
+            }
+
+            cView[index] = sum;
+        }
+
+        /// <summary>
+        /// The GPU Kernel for Doubles.
+        /// </summary>
+        private static void MatrixMultiplyKernelFloatHalf(
+            Index2D index, ArrayView2D<System.Half, Stride2D.DenseX> aView, ArrayView2D<System.Half, Stride2D.DenseX> bView, ArrayView2D<System.Half, Stride2D.DenseX> cView, int sharedDim)
+        {
+            int row = index.X;
+            int col = index.Y;
+            System.Half sum = (System.Half) 0.0f;
 
             for (int i = 0; i < sharedDim; i++)
             {
